@@ -1,60 +1,76 @@
-"""E2E: every level's stored solution reaches the goal with all stars; real drag+Go wins level 1."""
-import pathlib, sys
+"""Play desktop and mobile builds in a disposable headless Chromium."""
+import contextlib, functools, http.server, os, pathlib, sys, threading
 from playwright.sync_api import sync_playwright
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-URL = sys.argv[2] if len(sys.argv) > 2 else (ROOT / "docs/index.html").as_uri()
-OUT = pathlib.Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "tests/out"
+OUT = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / 'tests/out')
 OUT.mkdir(parents=True, exist_ok=True)
 
-with sync_playwright() as p:
-    b = p.chromium.launch()
-    errs = []
-    pg = b.new_page(viewport={"width": 390, "height": 844}, device_scale_factor=2, has_touch=True)
-    pg.on("pageerror", lambda e: errs.append(str(e)))
-    pg.goto(URL)
-    res = pg.evaluate("""() => RB.LEVELS.map((L,i) => {
-        const lv = RB.parseLevel(L); const empty = RB.simulate(lv).outcome;
-        RB.applySolution(lv, L.sol); const r = RB.simulate(lv);
-        return {i, name:L.name, empty, outcome:r.outcome, stars:r.stars, total:lv.stars.length,
-                n:RB.placedCount(lv), budget:lv.budget, sandbox:lv.sandbox};
-    })""")
-    ok = True
-    for r in res:
-        want = "loop" if r["sandbox"] else "goal"
-        good = r["outcome"] == want and r["stars"] == r["total"] and r["empty"] == "derail" and (not r["budget"] or r["n"] <= r["budget"])
-        ok &= good
-        print(("PASS" if good else "FAIL"), r)
+@contextlib.contextmanager
+def server():
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=ROOT / 'docs')
+    with http.server.ThreadingHTTPServer(('127.0.0.1', 0), handler) as httpd:
+        threading.Thread(target=httpd.serve_forever, daemon=True).start()
+        try:
+            yield f'http://127.0.0.1:{httpd.server_port}/'
+        finally:
+            httpd.shutdown()
 
-    # Real UI: drag the track on level 1, press Go, expect the win card.
-    pg.evaluate("localStorage.clear()"); pg.reload()
-    box = pg.locator("canvas").bounding_box()
-    S = box["width"] / 9
-    y = box["y"] + 4.5 * S
-    pg.mouse.move(box["x"] + 1.5 * S, y); pg.mouse.down()
-    for c in range(1, 8):
-        pg.mouse.move(box["x"] + (c + .5) * S, y, steps=3)
-    pg.mouse.up()
-    pg.screenshot(path=str(OUT / "phone-built.png"))
-    print("meta after drag:", pg.inner_text("#meta"))
-    pg.click("#go"); pg.wait_for_timeout(1300)
-    pg.screenshot(path=str(OUT / "phone-running.png"))
-    pg.wait_for_selector("#overlay.show", timeout=8000)
-    card = pg.inner_text("#card"); print("card:", card.replace("\n", " | "))
-    pg.screenshot(path=str(OUT / "phone-win.png"))
-    ok &= "Station reached" in card and "Perfect" in card
+with server() as local, sync_playwright() as p:
+    url = sys.argv[2] if len(sys.argv) > 2 else local
+    browser = p.chromium.launch(executable_path=os.getenv('CHROMIUM'), args=['--enable-unsafe-swiftshader'])
+    errors = []
+    def page(width, height, touch=False):
+        pg = browser.new_page(viewport={'width': width, 'height': height}, has_touch=touch, is_mobile=touch)
+        pg.on('pageerror', lambda err: errors.append(str(err)))
+        return pg
+    def launch(pg):
+        pg.goto(url, wait_until='networkidle')
+        pg.wait_for_function('window.RB !== undefined')
+    def sockets(pg):
+        return pg.evaluate("async()=>{const {V}=await import('./track.mjs');return RB.cells().map(p=>RB.screen(V(...p)));}")
+    def result(pg, title):
+        pg.wait_for_selector('#result[open]', timeout=25000)
+        assert pg.inner_text('#result-title') == title, pg.inner_text('#result-title')
+    ph = page(390,844,True)
+    launch(ph)
+    ph.screenshot(path=str(OUT/'phone.png'))
+    for x,y in sockets(ph):
+        ph.touchscreen.tap(round(x),round(y))
+    assert ph.evaluate('RB.snapshot().blocks')==2
+    ph.tap('#go');result(ph,'Station reached')
+    assert '1/1 stars' in ph.inner_text('#result-copy')
+    ph.screenshot(path=str(OUT/'phone-win.png'))
+    ph.reload();ph.wait_for_function('window.RB?.snapshot().blocks===2')
+    assert '★' in ph.inner_text('#levels button:first-child')
+    ph.close(); print('PASS phone: touchscreen snap, station, star, progress reload')
 
-    # Level 4 loop via Solve + run, desktop size; capture mid-loop.
-    d = b.new_page(viewport={"width": 1280, "height": 800})
-    d.on("pageerror", lambda e: errs.append(str(e)))
-    d.goto(URL); d.click("#levels button:nth-child(4)"); d.click("#solve"); d.click("#go")
-    d.wait_for_timeout(3300); d.screenshot(path=str(OUT / "desk-loop.png"))
-    d.wait_for_selector("#overlay.show", timeout=10000); c4 = d.inner_text("#card"); print("L4 card:", c4.replace("\n", " | "))
-    ok &= "Perfect" in c4
-    # Derail path: next level with no track built
-    d.click("#ov-b"); d.click("#go"); d.wait_for_selector("#overlay.show", timeout=8000)
-    c5 = d.inner_text("#card"); print("L5 empty:", c5.replace("\n", " | ")); d.screenshot(path=str(OUT / "desk-derail.png"))
-    ok &= "Derailed" in c5
-    print("pageerrors:", errs); ok &= not errs
-    b.close()
-print("ALL OK" if ok else "FAILURES"); sys.exit(0 if ok else 1)
+    d=page(1280,800);launch(d)
+    for l in d.evaluate('RB.solutions()'):
+        assert l['outcome']=='goal' and l['empty']=='derail' and l['stars']==l['total'],l
+        print('PASS solution:',l['name'],flush=True)
+    src=d.locator('#parts button').first.bounding_box(); x,y=sockets(d)[0]
+    d.mouse.move(src['x']+src['width']/2,src['y']+src['height']/2);d.mouse.down();d.mouse.move(x,y,steps=8);d.mouse.up()
+    assert d.evaluate('RB.snapshot().blocks')==1
+    d.click('#go');d.wait_for_function('RB.snapshot().phase==="air"',timeout=12000);result(d,'Derailed')
+    d.click('#retry');d.click('#levels button:nth-child(3)')
+    d.screenshot(path=str(OUT/'desktop.png'))
+    for _ in sockets(d):d.click('#hint')
+    d.click('#go');result(d,'Station reached')
+    d.click('#retry');d.click('#levels button:last-child')
+    d.click('#higher');d.click('#yaw');d.click('#pitch');d.click('#roll')
+    d.mouse.click(650,426);assert d.evaluate('RB.snapshot().blocks')==1
+    d.click('#reset');d.click('#hint');d.click('#go');d.wait_for_function('RB.snapshot().outcome==="loop"');d.click('#go')
+    assert d.evaluate('RB.snapshot().mode')=='build'
+    d.screenshot(path=str(OUT/'sandbox.png'));d.close()
+    print('PASS desktop: tray drag, gravity phase, wall challenge, sandbox layer and orientation')
+
+    s=page(360,360)
+    for n in range(1,8):
+        s.goto(f'{url}?shot={n}&t=1.25&capture=1',wait_until='networkidle')
+        s.wait_for_function('window.RBShot !== undefined')
+        a,b=s.evaluate('()=>{let a=RBShot.png(1.25);RBShot.png(0);return [a,RBShot.png(1.25)];}')
+        assert a==b and len(a)>2000,(n,len(a))
+        s.locator('canvas').screenshot(path=str(OUT/f'shot-{n}.png'))
+    assert not errors,errors
+    print('PASS replay: 7 seek-stable shots, no page errors',flush=True)

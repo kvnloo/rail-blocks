@@ -1,16 +1,25 @@
-# Rail Blocks
+# Rail Blocks 3D
 
-A tiny browser puzzle inspired by the magnetic block train toys: snap colorful track blocks
-together, then send a bullet train up walls, around loops and across the ceiling to the station.
+[Play Rail Blocks](https://kvnloo.github.io/rail-blocks/). Snap toy-plastic rails together on a wooden desk and send the magnetic train up a wall, across the ceiling, or over the edge. Miss a connection and it tumbles off.
 
-**Play:** https://kvnloo.github.io/rail-blocks/
+- **Challenges:** tap the blueprints or drag from the parts tray. Collect the stars and reach the checkered flag. Hint fits one piece at a time.
+- **Free build:** pick a part and tap the grid. Use the layer arrows, Turn, Tilt, and Roll to build in three dimensions. Sample loop gives you an upside-down course on a clear desk.
+- **Camera:** use Orbit to switch from building to looking around. Drag to rotate, pinch or scroll to zoom. Use the target button to reset the view.
+- **Keyboard:** Space runs or stops the train, O toggles Orbit, Esc returns to the build. In Free build, R/T/F rotate a part and `[`/`]` change layers.
 
-- Drag across the board to lay track; corners are fitted automatically.
-- Tap a block to cycle its shape (straight, curves, ✚ crossing for loops, empty).
-- ▶ Go runs the train. Collect every ★, reach the 🏁. A gap derails it.
-- 6 puzzle levels + a sandbox. Progress and tracks are saved in your browser.
+The desk and challenge progress are saved in your browser. The game is static HTML, CSS, and JavaScript with vendored Three.js r187. Serve `docs/` over HTTP; no build or CDN is needed.
 
-Single static file (`docs/index.html`), no build step, no dependencies.
+## Replay
 
-Test: `pip install playwright && playwright install chromium && python3 tests/e2e.py`
-(checks that every level's stored solution reaches the goal with all stars, and plays level 1 through real drag input).
+`?shot=edge&t=1.2` renders one frame, at 1.2 seconds into the shot. IDs: `coasters`, `edge`, `halfpipe`, `climb`, `spiral`, `layered`, `tower` (or `1` through `7`). With `&capture=1`, `RBShot.png(t)` returns a base64 PNG of the WebGL canvas. Use a 720 × 720 viewport with device scale one for plates. Shots use the same block meshes, train, and rail sampling as the game.
+
+## Tests
+
+```sh
+node tests/core.mjs
+python3 -m pip install playwright
+python3 -m playwright install chromium
+python3 tests/e2e.py
+```
+
+The Playwright suite starts a temporary loopback server, drives desktop and touch input, checks progress after reload, and verifies fixed-time replays. To test an existing site, pass the screenshot directory and URL as arguments.
