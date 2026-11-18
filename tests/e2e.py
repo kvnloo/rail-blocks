@@ -62,8 +62,33 @@ with server() as local, sync_playwright() as p:
     d.mouse.click(650,426);assert d.evaluate('RB.snapshot().blocks')==1
     d.click('#reset');d.click('#hint');d.click('#go');d.wait_for_function('RB.snapshot().outcome==="loop"');d.click('#go')
     assert d.evaluate('RB.snapshot().mode')=='build'
-    d.screenshot(path=str(OUT/'sandbox.png'));d.close()
-    print('PASS desktop: tray drag, gravity phase, wall challenge, sandbox layer and orientation')
+    d.screenshot(path=str(OUT/'sandbox.png'))
+    print('PASS desktop: tray drag, gravity phase, wall challenge, sandbox layer and orientation', flush=True)
+
+    d.select_option('#preset','cross-junction');d.click('#load-preset')
+    assert d.inner_text('#title')=='Cross Junction'
+    assert d.evaluate('RB.snapshot().blocks')==23
+    d.reload();d.wait_for_function('window.RB?.snapshot().preset === "cross-junction"')
+    assert d.input_value('#preset')=='cross-junction'
+    d.screenshot(path=str(OUT/'cross-junction.png'));d.close()
+    print('PASS desktop: crossing preset builds and survives reload', flush=True)
+
+    m=page(390,844,True);launch(m);m.tap('#levels button:last-child')
+    assert m.locator('#preset option').count()==11 # Placeholder, sample loop and nine named layouts.
+    m.select_option('#preset','full-circle');m.tap('#load-preset')
+    assert m.inner_text('#title')=='Full Circle'
+    m.screenshot(path=str(OUT/'phone-preset.png'))
+    m.evaluate('''() => {
+        window.railEvents = [];
+        window.addEventListener('railblocks:audio', e => railEvents.push(e.detail));
+    }''')
+    m.tap('#go');m.wait_for_function('RB.snapshot().laps >= 1',timeout=35000);m.tap('#go')
+    events=m.evaluate('railEvents')
+    assert [e['type'] for e in events[:2]]==['seat','start']
+    assert events[-1]['type']=='stop'
+    assert len([e for e in events if e['type']=='seam' and 0 < e['speed'] <= .25])>=4
+    assert not any(e['type']=='impact' for e in events)
+    m.close();print('PASS phone: named layout, full lap, seating, seam and stop events', flush=True)
 
     s=page(360,360)
     for n in range(1,8):
