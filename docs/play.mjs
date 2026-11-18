@@ -38,9 +38,9 @@ export function play(canvas){
     $('erase').setAttribute('aria-pressed',String(erase));[...parts.children].forEach((b,i)=>b.setAttribute('aria-pressed',String(i===selected&&!erase)));$('hint').disabled=state!=='build';$('go').innerHTML=state==='run'?'■ Stop train':'<span>▶</span> Run train';
   }
   function view(){
-    const small=innerWidth<670, over=index===3, wall=index===2;
-    controls.target.set(over?1:0,over?-1:wall?1.2:.05,0);
-    camera.position.copy(controls.target).add(V(over?4.8:3.1,over?5.6:7.6,small?18.5:11.3));
+    const small=innerWidth<670, over=index===3, wall=index===2, free=l===bench, high=free?Math.max(0,...[...tiles.values()].map(b=>b.p.y)):0;
+    controls.target.set(over?1:high?-.7:0,over?-1:wall?1.2:high*.42+.05,0);
+    camera.position.copy(controls.target).add(V(over?4.8:3.1,over?5.6:7.6,(small?18.5:11.3)+high*.43));
     camera.fov=small?47:36;camera.updateProjectionMatrix();controls.update();
   }
   function orbit(on){orb=on;controls.enabled=on;$('orbit').setAttribute('aria-pressed',String(on));}
@@ -119,7 +119,7 @@ export function play(canvas){
     }
   }
   $('result').addEventListener('close',()=>{if($('result').returnValue==='next'){ $('result').returnValue='';load(Math.min(index+1,levels.length));}});
-  $('go').onclick=go;$('reset').onclick=()=>load(index,true);$('hint').onclick=()=>{if(l===bench){if(tiles.size){toast('Clear your build before loading the sample');return;}for(const b of exampleLoop)tiles.set(key(b.p),b);rebuild();save();audio.click(620);toast('Ready for an upside-down lap');return;}const b=l.solution.find(b=>!tiles.has(key(b.p)));if(b){place(b.p);toast('One block snapped in');}else toast('The track is ready');};
+  $('go').onclick=go;$('reset').onclick=()=>load(index,true);$('hint').onclick=()=>{if(l===bench){if(tiles.size){toast('Clear your build before loading the sample');return;}for(const b of exampleLoop)tiles.set(key(b.p),b);rebuild();save();view();audio.click(620);toast('Ready for an upside-down lap');return;}const b=l.solution.find(b=>!tiles.has(key(b.p)));if(b){place(b.p);toast('One block snapped in');}else toast('The track is ready');};
   $('orbit').onclick=()=>orbit(!orb);$('view').onclick=view;$('mute').onclick=e=>{const on=e.target.getAttribute('aria-pressed')!=='true';e.target.setAttribute('aria-pressed',String(on));e.target.textContent=on?'♪̸':'♪';audio.mute(on);};
   $('higher').onclick=()=>setLayer(1);$('lower').onclick=()=>setLayer(-1);$('yaw').onclick=()=>rotate(UP);$('pitch').onclick=()=>rotate(Z);$('roll').onclick=()=>rotate(X);$('erase').onclick=()=>{erase=!erase;update();};
   window.addEventListener('keydown',e=>{if(e.target.matches('button')||$('result').open)return;if(e.code==='Space'){e.preventDefault();go();}if(e.key==='o')orbit(!orb);if(e.key==='Escape')load(index);if(l===bench){if(e.key==='r')rotate(UP);if(e.key==='t')rotate(Z);if(e.key==='f')rotate(X);if(e.key==='[')setLayer(-1);if(e.key===']')setLayer(1);}});
